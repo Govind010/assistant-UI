@@ -1,6 +1,6 @@
 interface Message {
   id: string;
-  userId: string; // Link message to user
+  userId: string;
   type: "user" | "assistant";
   content: string;
   timestamp: string;
@@ -11,17 +11,18 @@ interface User {
   name: string;
   avatar: string;
   voice: string;
+  language: string;
   lastActive: string;
   isOnline: boolean;
 }
 
-// Separate users data
 export const users: User[] = [
   {
     id: "user1",
     name: "Sarah Johnson",
     avatar: "/placeholder.svg?height=40&width=40",
     voice: "Emma - Energetic",
+    language: "en",
     lastActive: "2 min ago",
     isOnline: true,
   },
@@ -30,6 +31,7 @@ export const users: User[] = [
     name: "Mike Chen",
     avatar: "/placeholder.svg?height=40&width=40",
     voice: "James - Authoritative",
+    language: "en",
     lastActive: "1 hour ago",
     isOnline: false,
   },
@@ -38,6 +40,7 @@ export const users: User[] = [
     name: "Emma Davis",
     avatar: "/placeholder.svg?height=40&width=40",
     voice: "Lily - Calming",
+    language: "en",
     lastActive: "3 hours ago",
     isOnline: false,
   },
@@ -46,12 +49,12 @@ export const users: User[] = [
     name: "Alex Rodriguez",
     avatar: "/placeholder.svg?height=40&width=40",
     voice: "Alex - Professional",
+    language: "hi",
     lastActive: "Yesterday",
     isOnline: false,
   },
 ];
 
-// Separate messages data
 export const messages: Message[] = [
   // Sarah Johnson's messages
   {
@@ -65,7 +68,8 @@ export const messages: Message[] = [
     id: "2",
     userId: "user1",
     type: "assistant",
-    content: "Today's weather is sunny with a high of 75°F and partly cloudy skies. Perfect for outdoor activities!",
+    content:
+      "Today's weather is sunny with a high of 75°F and partly cloudy skies. Perfect for outdoor activities!",
     timestamp: "10:30 AM",
   },
   {
@@ -79,7 +83,8 @@ export const messages: Message[] = [
     id: "4",
     userId: "user1",
     type: "assistant",
-    content: "I've set a reminder for your meeting at 3 PM today. You'll receive a notification 15 minutes before.",
+    content:
+      "I've set a reminder for your meeting at 3 PM today. You'll receive a notification 15 minutes before.",
     timestamp: "10:32 AM",
   },
   {
@@ -93,10 +98,11 @@ export const messages: Message[] = [
     id: "6",
     userId: "user1",
     type: "assistant",
-    content: "Playing jazz playlist from your music library. Enjoy the smooth sounds!",
+    content:
+      "Playing jazz playlist from your music library. Enjoy the smooth sounds!",
     timestamp: "10:35 AM",
   },
-  
+
   // Mike Chen's messages
   {
     id: "7",
@@ -109,7 +115,8 @@ export const messages: Message[] = [
     id: "8",
     userId: "user2",
     type: "assistant",
-    content: "A 15% tip on $84.50 would be $12.68. The total amount would be $97.18.",
+    content:
+      "A 15% tip on $84.50 would be $12.68. The total amount would be $97.18.",
     timestamp: "9:15 AM",
   },
   {
@@ -123,10 +130,11 @@ export const messages: Message[] = [
     id: "10",
     userId: "user2",
     type: "assistant",
-    content: "Tomorrow you have a team meeting at 9 AM, lunch with clients at 12 PM, and a project review at 3 PM.",
+    content:
+      "Tomorrow you have a team meeting at 9 AM, lunch with clients at 12 PM, and a project review at 3 PM.",
     timestamp: "9:20 AM",
   },
-  
+
   // Emma Davis's messages
   {
     id: "11",
@@ -139,7 +147,8 @@ export const messages: Message[] = [
     id: "12",
     userId: "user3",
     type: "assistant",
-    content: "I'd be happy to help! Here's a simple chocolate cake recipe: You'll need flour, sugar, cocoa powder, eggs, butter, and vanilla. Would you like the full step-by-step instructions?",
+    content:
+      "I'd be happy to help! Here's a simple chocolate cake recipe: You'll need flour, sugar, cocoa powder, eggs, butter, and vanilla. Would you like the full step-by-step instructions?",
     timestamp: "7:45 AM",
   },
   {
@@ -153,10 +162,11 @@ export const messages: Message[] = [
     id: "14",
     userId: "user3",
     type: "assistant",
-    content: "Here's the complete recipe with measurements and baking instructions...",
+    content:
+      "Here's the complete recipe with measurements and baking instructions...",
     timestamp: "7:46 AM",
   },
-  
+
   // Alex Rodriguez's messages
   {
     id: "15",
@@ -169,7 +179,8 @@ export const messages: Message[] = [
     id: "16",
     userId: "user4",
     type: "assistant",
-    content: "Here are the top tech news stories: AI advancements in healthcare, new smartphone releases, and cybersecurity updates...",
+    content:
+      "Here are the top tech news stories: AI advancements in healthcare, new smartphone releases, and cybersecurity updates...",
     timestamp: "Yesterday",
   },
 ];
@@ -194,24 +205,51 @@ export const languages = [
   { code: "en", name: "English", flag: "🇺🇸" },
 ];
 
-// Helper functions
 export const getUserMessages = (userId: string): Message[] => {
-  return messages.filter(message => message.userId === userId);
+  return messages.filter((message) => message.userId === userId);
 };
 
 export const getUserMessageCount = (userId: string): number => {
   return getUserMessages(userId).length;
 };
 
-export const addMessage = (userId: string, type: "user" | "assistant", content: string): Message => {
+export const addMessage = (
+  userId: string,
+  type: "user" | "assistant",
+  content: string
+): Message => {
   const newMessage: Message = {
     id: Date.now().toString(),
     userId,
     type,
     content,
-    timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+    timestamp: new Date().toLocaleTimeString([], {
+      hour: "2-digit",
+      minute: "2-digit",
+    }),
   };
-  
+
   messages.push(newMessage);
   return newMessage;
+};
+
+export const addUser = (name: string, language: string = "en"): User => {
+  const newUser: User = {
+    id: `user${users.length + 1}`,
+    name,
+    avatar: "/placeholder.svg?height=40&width=40",
+    voice: voices[0].name,
+    language,
+    lastActive: "Just now",
+    isOnline: true,
+  };
+
+  users.unshift(newUser);
+  const welcomeMessage =
+    language === "hi"
+      ? "नमस्ते! मैं आपकी कैसे मदद कर सकता हूं?"
+      : "Hello! How can I assist you today?";
+
+  addMessage(newUser.id, "assistant", welcomeMessage);
+  return newUser;
 };

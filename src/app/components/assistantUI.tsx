@@ -15,12 +15,17 @@ type AssistantState = "idle" | "listening" | "processing" | "speaking";
 
 export default function AssistantUI() {
   const [state, setState] = useState<AssistantState>("idle");
-  const [selectedUser, setSelectedUser] = useState<string>("user1");
+  const [selectedUser, setSelectedUser] = useState<string>(users[0].id);
   const [selectedVoice, setSelectedVoice] = useState(voices[0].id);
   const [selectedLanguage, setSelectedLanguage] = useState(languages[0].code);
 
-  const currentUser = users.find((user) => user.id === selectedUser) || users[0];
+  const currentUser =
+    users.find((user) => user.id === selectedUser) || users[0];
   const userMessages = getUserMessages(selectedUser);
+
+  useEffect(() => {
+    setSelectedLanguage(currentUser.language);
+  }, [currentUser]);
 
   const conversation = useConversation({
     onConnect: () => console.log("Connected"),
@@ -89,11 +94,9 @@ export default function AssistantUI() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 p-4 relative overflow-hidden">
-      {/* Animated background elements */}
       <BackgroundAnimation />
 
       <div className="max-w-7xl mx-auto relative z-10">
-        {/* Header */}
         <Header />
 
         <div className="grid lg:grid-cols-3 gap-8">
@@ -112,10 +115,7 @@ export default function AssistantUI() {
               />
 
               {/* Chat Conversation */}
-              <ChatConversation
-                user={currentUser}
-                messages={userMessages}
-              />
+              <ChatConversation user={currentUser} messages={userMessages} />
             </div>
           </div>
 

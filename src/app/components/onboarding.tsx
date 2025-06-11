@@ -10,9 +10,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Sparkles, Languages, ArrowRight } from "lucide-react"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-
-// Import the languages from the same constants file
-import { languages } from "./constants"
+import { languages,addUser } from "./constants"
 
 export default function OnboardingPage() {
   const router = useRouter()
@@ -21,7 +19,9 @@ export default function OnboardingPage() {
   const [isLoading, setIsLoading] = useState(false)
 
   const handleSubmit = (e: React.FormEvent) => {
+    console.log("lang :", selectedLanguage);
     e.preventDefault();
+    addUser(name, selectedLanguage);
     router.push("/assistant");
   };
 
