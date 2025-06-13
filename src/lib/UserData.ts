@@ -187,8 +187,8 @@ export const messages: Message[] = [
 
 export const voices = [
   {
-    id: "A5W9pR9OjIbu80J0WuDW",
-    name: "Anika",
+    id: "UgBBYS2sOqTuMpoF3BR0",
+    name: "Mark",
     description: " Warm and friendly",
     color: "from-blue-500 to-cyan-500",
   },
@@ -198,11 +198,33 @@ export const voices = [
     description: "Professional and clear",
     color: "from-pink-500 to-rose-500",
   },
+  {
+    id: "tnSpp4vdxKPjI9w0GnoV",
+    name: "Hope",
+    description: "Energetic and lively",
+    color: "from-purple-500 to-pink-500",
+  },
+  {
+    id: "A5W9pR9OjIbu80J0WuDW",
+    name: "Anika",
+    description: "Authoritative and confident",
+    color: "from-green-500 to-teal-500",
+  },
+  {
+    id: "pFZP5JQG7iQjIQuC4Bku",
+    name: "Lily",
+    description: "Energetic and engaging",
+    color: "from-yellow-500 to-orange-500",
+  },
 ];
 
 export const languages = [
-  { code: "hi", name: "Hindi", flag: "HN" },
-  { code: "en", name: "English", flag: "🇺🇸" },
+  { code: "en", name: "English"},
+  { code: "hi", name: "Hindi" },
+  { code: "ta", name: "Tamil" },
+  { code: "ja", name: "Japanese" },
+  { code: "fr", name: "French" },
+  { code: "de", name: "German" },
 ];
 
 export const getUserMessages = (userId: string): Message[] => {
@@ -245,11 +267,11 @@ export const addUser = (name: string, language: string = "en"): User => {
   };
 
   users.unshift(newUser);
-  const welcomeMessage =
-    language === "hi"
-      ? "नमस्ते! मैं आपकी कैसे मदद कर सकता हूं?"
-      : "Hello! How can I assist you today?";
+  // const welcomeMessage =
+  //   language === "hi"
+  //     ? "नमस्ते! मैं आपकी कैसे मदद कर सकता हूं?"
+  //     : "Hello! How can I assist you today?";
 
-  addMessage(newUser.id, "assistant", welcomeMessage);
+  // addMessage(newUser.id, "assistant", welcomeMessage);
   return newUser;
 };
