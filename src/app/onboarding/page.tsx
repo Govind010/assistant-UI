@@ -2,7 +2,7 @@
 
 import type React from "react";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -16,18 +16,66 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { languages, addUser } from "../../lib/UserData";
 
 export default function OnboardingPage() {
   const router = useRouter();
   const [name, setName] = useState("");
-  const [selectedLanguage, setSelectedLanguage] = useState(languages[0].code);
+  const [languages, setLanguages] = useState<{ code: string; name: string }[]>(
+    []
+  );
+  const [selectedLanguage, setSelectedLanguage] = useState<string>(
+    languages[0]?.code || "en"
+  );
   const [isLoading, setIsLoading] = useState(false);
+  const [rooms, setRooms] = useState<
+    { id: string; name: string; users: { name: string }[] }[]
+  >([]);
+  const [selectedRoom, setSelectedRoom] = useState<string>("");
+
+  useEffect(() => {
+    fetch("/api/languages")
+      .then((response) => response.json())
+      .then((data) => {
+        if (
+          data.languages &&
+          Array.isArray(data.languages) &&
+          data.languages.length > 0
+        ) {
+          setLanguages(data.languages);
+          setSelectedLanguage(data.languages[0].code);
+        }
+      })
+      .catch((error) => console.error("Error:", error));
+
+    fetch("/api/rooms")
+      .then((response) => response.json())
+      .then((data) => {
+        if (data.rooms && Array.isArray(data.rooms) && data.rooms.length > 0) {
+          setRooms(data.rooms);
+          console.log("Rooms:", data.rooms);
+          console.log("Selected Room:", data.rooms[0]);
+          setSelectedRoom(data.rooms[0].id);
+        }
+      })
+      .catch((error) => console.error("Error:", error));
+  }, []);
+
+  useEffect(() => {
+    console.log(
+      `room_id:${selectedRoom},language:${selectedLanguage},name:${name}`
+    );
+  }, [selectedLanguage, selectedRoom, name]);
 
   const handleSubmit = (e: React.FormEvent) => {
-    console.log("lang :", selectedLanguage);
     e.preventDefault();
-    addUser(name, selectedLanguage);
+
+    const user = {
+      roomid: selectedRoom,
+      language: selectedLanguage,
+      name: name,
+    };
+
+    localStorage.setItem("user", JSON.stringify(user));
     router.push("/assistant");
   };
 
@@ -49,7 +97,7 @@ export default function OnboardingPage() {
             </div>
           </div>
           <h1 className="text-4xl font-bold bg-gradient-to-r from-white via-purple-200 to-cyan-200 bg-clip-text text-transparent mb-3">
-            Welcome to AI Assistant
+            Welcome to our translation app
           </h1>
           <p className="text-gray-300 text-lg">
             Let's personalize your experience
@@ -80,37 +128,70 @@ export default function OnboardingPage() {
                 />
               </div>
 
-              {/* Language Selection */}
-              <div className="space-y-2">
-                <Label
-                  htmlFor="language"
-                  className="text-white flex items-center gap-2"
-                >
-                  <Languages className="w-4 h-4 text-cyan-400" />
-                  Preferred Language
-                </Label>
-                <Select
-                  value={selectedLanguage}
-                  onValueChange={setSelectedLanguage}
-                >
-                  <SelectTrigger className="bg-white/10 border-white/20 text-white">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent className="bg-gray-900 border-gray-700">
-                    {languages.map((lang) => (
-                      <SelectItem
-                        key={lang.code}
-                        value={lang.code}
-                        className="text-white hover:bg-gray-800"
-                      >
-                        <div className="flex items-center space-x-3">
-                          {/* <span className="text-lg">{lang.flag}</span> */}
-                          <span>{lang.name}</span>
-                        </div>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+              <div className="flex justify-between">
+                {/* Room Selection */}
+                <div className="space-y-2">
+                  <Label
+                    htmlFor="room"
+                    className="text-white flex items-center gap-2"
+                  >
+                    <Languages className="w-4 h-4 text-cyan-400" />
+                    Choose a Room
+                  </Label>
+                  <Select value={selectedRoom} onValueChange={setSelectedRoom}>
+                    <SelectTrigger className="bg-white/10 border-white/20 text-white w-full">
+                      <SelectValue placeholder="Select a room" />
+                    </SelectTrigger>
+                    <SelectContent className="bg-gray-900 border-gray-700">
+                      {rooms.map((room) => (
+                        <SelectItem
+                          key={room.id}
+                          value={room.id}
+                          className="text-white hover:bg-gray-800"
+                        >
+                          <div className="flex items-center space-x-3">
+                            <span>{room.name}</span>
+                            <span className="text-xs text-gray-400">
+                              ({room.users?.length ?? 0} users)
+                            </span>
+                          </div>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {/* Language Selection */}
+                <div className="space-y-2">
+                  <Label
+                    htmlFor="language"
+                    className="text-white flex items-center gap-2"
+                  >
+                    <Languages className="w-4 h-4 text-cyan-400" />
+                    Preferred Language
+                  </Label>
+                  <Select
+                    value={selectedLanguage}
+                    onValueChange={setSelectedLanguage}
+                  >
+                    <SelectTrigger className="bg-white/10 border-white/20 text-white w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent className="bg-gray-900 border-gray-700">
+                      {languages.map((lang) => (
+                        <SelectItem
+                          key={lang.code}
+                          value={lang.code}
+                          className="text-white hover:bg-gray-800"
+                        >
+                          <div className="flex items-center space-x-3">
+                            <span>{lang.name}</span>
+                          </div>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
 
               {/* Submit Button */}
@@ -123,7 +204,7 @@ export default function OnboardingPage() {
                   "Setting up..."
                 ) : (
                   <>
-                    Continue to Assistant
+                    Continue
                     <ArrowRight className="w-4 h-4" />
                   </>
                 )}
@@ -134,7 +215,7 @@ export default function OnboardingPage() {
 
         {/* Footer */}
         <p className="text-center text-gray-400 text-sm mt-6">
-          Your AI assistant is ready to help you in your preferred language
+          We are ready to help you in your preferred language
         </p>
       </div>
     </div>

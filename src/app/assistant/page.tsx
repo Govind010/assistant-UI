@@ -1,21 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
-import { useConversation } from "@elevenlabs/react";
-
-// Import from constants file
-import {
-  users,
-  messages,
-  voices,
-  languages,
-  getUserMessages,
-  getUserMessageCount,
-  addMessage,
-  addUser,
-} from "../../lib/UserData";
-
-// Import components
+import { useState, useEffect, useRef } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
@@ -37,112 +22,395 @@ import {
   Volume2,
   RotateCcw,
   Users,
-  Clock,
   Languages,
 } from "lucide-react";
+import Recorder from "recorder-js";
 
-// Define types
-type AssistantState = "idle" | "listening" | "processing" | "speaking";
+type AssistantState = "idle" | "listening" | "Sending" | "speaking";
 
 export default function AssistantUI() {
   const [state, setState] = useState<AssistantState>("idle");
-  const [selectedUser, setSelectedUser] = useState<string>(users[0].id);
-  const [selectedVoice, setSelectedVoice] = useState(voices[0].id);
-  const [selectedLanguage, setSelectedLanguage] = useState(languages[0].code);
-
-  const currentUser =
-    users.find((user) => user.id === selectedUser) || users[0];
-  const userMessages = getUserMessages(selectedUser);
+  const [userName, setUserName] = useState<string>("");
+  const [userLanguage, setUserLanguage] = useState<string>("");
+  const [languagesList, setLanguagesList] = useState<
+    { code: string; name: string }[]
+  >([]);
+  const [selectedLanguage, setSelectedLanguage] = useState<string>("en");
+  const [rooms, setRooms] = useState<
+    { id: string; name: string; users: { name: string }[] }[]
+  >([]);
+  const [selectedRoom, setSelectedRoom] = useState<string>("");
+  const wsRef = useRef<WebSocket | null>(null);
+  const recorderRef = useRef<Recorder | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const [fetchedUsers, setFetchedUsers] = useState<any[]>([]);
+  const [chatMessages, setChatMessages] = useState<any[]>([]);
+  const silenceTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const silenceStartRef = useRef<number | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
 
   useEffect(() => {
-    // Set the language based on current user's language preference
-    const userLang =
-      languages.find((lang) => lang.code === currentUser.language) ||
-      languages[0];
-    setSelectedLanguage(userLang.code);
+    const userData = localStorage.getItem("user");
+    if (userData) {
+      const user = JSON.parse(userData);
+      console.log("Loaded user from localStorage:", user);
+    } else {
+      console.log("No user found in localStorage.");
+    }
+  }, []);
 
-    // Set the voice based on current user's voice preference
-    const userVoice =
-      voices.find((voice) => voice.name === currentUser.voice) || voices[0];
-    setSelectedVoice(userVoice.id);
-  }, [currentUser]);
+  const connectWebSocket = async () => {
+    const ws = new WebSocket("ws://localhost:8000/ws/translate/");
 
-  const conversation = useConversation({
-    onConnect: () => console.log("Connected"),
-    onDisconnect: () => console.log("Disconnected"),
-    onMessage: (message) => {
-      console.log("Message:", message);
-      addMessage(
-        selectedUser,
-        message.source == "ai" ? "assistant" : "user",
-        message.message
-      );
-    },
-    onError: (error) => console.error("Error:", error),
-  });
+    ws.onopen = () => {
+      console.log("WebSocket connection established");
+      const userData = localStorage.getItem("user");
 
-  const startConversation = useCallback(async () => {
-    try {
-      // Request microphone permission
-      await navigator.mediaDevices.getUserMedia({ audio: true });
-
-      const agentId = process.env.NEXT_PUBLIC_AGENT_ID;
-
-      if (!agentId) {
-        throw new Error(
-          "Agent ID is not defined. Please set NEXT_PUBLIC_AGENT_ID in your environment variables."
+      if (userData) {
+        const user = JSON.parse(userData);
+        setUserName(user.name);
+        setUserLanguage(user.language);
+        console.log(
+          "Sending user data to WebSocket:",
+          user.roomid,
+          user.language,
+          user.name
         );
+        ws.send(
+          JSON.stringify({
+            room: user.roomid,
+            language: user.language,
+            name: user.name,
+          })
+        );
+      } else {
+        console.log("No user data found in localStorage.");
       }
+    };
+    ws.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
 
-      // Start the conversation with your agent
-      await conversation.startSession({
-        agentId: agentId,
-        overrides: {
-          agent: {
-            language: selectedLanguage,
-          },
-          tts: {
-            voiceId: selectedVoice,
-          },
+        if (data.message) {
+          console.log("Message:", data.message);
+        }
+        if (data.type === "room_list_update") {
+          console.log("Room list updated.");
+          fetchUsers();
+        }
+
+        if (data.user_id) {
+          console.log("User ID:", data.user_id);
+          localStorage.setItem("userId", JSON.stringify(data.user_id));
+        }
+
+        if (data.sender_id) {
+          const userId = JSON.parse(localStorage.getItem("userId") || '""');
+          const senderId = data.sender_id;
+          if (senderId != userId) {
+            playAudio(data.audio);
+            if (data.translation) {
+              setChatMessages((prev) => [
+                ...prev,
+                {
+                  id: Date.now(),
+                  type: "receiver",
+                  content: data.translation,
+                  timestamp: new Date().toLocaleTimeString(),
+                },
+              ]);
+            } else if (data.transcript) {
+              setChatMessages((prev) => [
+                ...prev,
+                {
+                  id: Date.now(),
+                  type: "receiver",
+                  content: data.transcript,
+                  timestamp: new Date().toLocaleTimeString(),
+                },
+              ]);
+            }
+          } else if (data.transcript) {
+            setChatMessages((prev) => [
+              ...prev,
+              {
+                id: Date.now(),
+                type: "sender",
+                content: data.transcript,
+                timestamp: new Date().toLocaleTimeString(),
+              },
+            ]);
+          }
+        }
+
+        if (data.error) {
+          console.log("Error:", data.error);
+        }
+      } catch (error) {
+        setState("idle");
+        console.error("Error parsing message:", error);
+      }
+    };
+    ws.onerror = (error) => {
+      console.error("WebSocket error:", error);
+    };
+    ws.onclose = () => {
+      console.log("WebSocket connection closed");
+    };
+    wsRef.current = ws;
+  };
+
+  const disconnect = () => {
+    if (wsRef.current) {
+      wsRef.current.close();
+      wsRef.current = null;
+    }
+  };
+
+  useEffect(() => {
+    connectWebSocket();
+    return () => {
+      disconnect();
+      if (audioContextRef.current) {
+        audioContextRef.current.close();
+      }
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((track) => track.stop());
+      }
+    };
+  }, []);
+  useEffect(() => {
+    if (state === "Sending") {
+      setTimeout(() => {
+        setState("idle");
+      }, 5000);
+    }
+  }, [state]);
+
+  const initializeRecorder = async (): Promise<boolean> => {
+    try {
+      // Get user media
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamRef.current = stream;
+
+      // Create audio context
+      const audioContext = new (window.AudioContext ||
+        (window as any).webkitAudioContext)();
+      audioContextRef.current = audioContext;
+
+      // Create analyser node for silence detection
+      const analyser = audioContext.createAnalyser();
+      analyser.fftSize = 2048;
+      analyserRef.current = analyser;
+
+      // Connect stream to analyser
+      const source = audioContext.createMediaStreamSource(stream);
+      source.connect(analyser);
+
+      // Create recorder instance
+      const recorder = new Recorder(audioContext, {
+        onAnalysed: (data: any) => {
+          // audio analysis data for visualization
         },
       });
+
+      await recorder.init(stream);
+      recorderRef.current = recorder;
+
+      return true;
     } catch (error) {
-      console.error("Failed to start conversation:", error);
+      console.error("Error initializing recorder:", error);
+      return false;
     }
-  }, [conversation, selectedLanguage, selectedVoice]);
+  };
 
-  const stopConversation = useCallback(async () => {
-    await conversation.endSession();
-  }, [conversation]);
+  // Silence detection logic
+  const checkSilence = () => {
+    if (!analyserRef.current) return;
+    const analyser = analyserRef.current;
+    const dataArray = new Uint8Array(analyser.fftSize);
+    analyser.getByteTimeDomainData(dataArray);
 
-  useEffect(() => {
-    if (conversation.status === "disconnected") {
-      setState("idle");
-    } else if (conversation.status === "connecting") {
-      setState("processing");
-    } else if (conversation.status === "connected") {
-      if (state !== "idle") {
-        conversation.isSpeaking ? setState("speaking") : setState("listening");
+    // Calculate RMS (root mean square) to detect silence
+    let sum = 0;
+    for (let i = 0; i < dataArray.length; i++) {
+      const normalized = (dataArray[i] - 128) / 128;
+      sum += normalized * normalized;
+    }
+    const rms = Math.sqrt(sum / dataArray.length);
+
+    const SILENCE_THRESHOLD = 0.02; // Adjust as needed
+    const SILENCE_DURATION = 4000; // 4 seconds
+
+    if (rms < SILENCE_THRESHOLD) {
+      if (silenceStartRef.current === null) {
+        silenceStartRef.current = Date.now();
+      } else if (Date.now() - silenceStartRef.current > SILENCE_DURATION) {
+        stopRecording();
+        silenceStartRef.current = null;
+        return;
       }
+    } else {
+      silenceStartRef.current = null;
     }
-  }, [conversation.status, state, conversation.isSpeaking]);
+
+    silenceTimeoutRef.current = setTimeout(checkSilence, 200);
+  };
+
+  const startRecording = async () => {
+    try {
+      if (!recorderRef.current) {
+        const initialized = await initializeRecorder();
+        if (!initialized) {
+          console.error("Failed to initialize recorder");
+          return;
+        }
+      }
+
+      setState("listening");
+      console.log("Started recording...");
+
+      // Start recording
+      recorderRef.current!.start();
+
+      // Start silence detection
+      silenceStartRef.current = null;
+      checkSilence();
+    } catch (error) {
+      console.error("Error starting recording:", error);
+      setState("idle");
+    }
+  };
+
+  const stopRecording = async () => {
+    try {
+      if (!recorderRef.current) {
+        console.error("Recorder not initialized");
+        return;
+      }
+
+      setState("Sending");
+      console.log("Recording stopped, Sending audio...");
+
+      // Stop silence detection
+      if (silenceTimeoutRef.current) {
+        clearTimeout(silenceTimeoutRef.current);
+        silenceTimeoutRef.current = null;
+      }
+      silenceStartRef.current = null;
+
+      // Stop recording and get the audio data
+      const { blob, buffer } = await recorderRef.current.stop();
+
+      // Convert blob to base64
+      const base64Audio = await blobToBase64(blob);
+
+      wsRef.current?.send(JSON.stringify({ audio: base64Audio }));
+
+      // Clean up - stop all tracks
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((track) => track.stop());
+        streamRef.current = null;
+      }
+
+      // Reset recorder for next use
+      recorderRef.current = null;
+      analyserRef.current = null;
+    } catch (error) {
+      console.error("Error stopping recording:", error);
+      setState("idle");
+    }
+  };
+
+  const playAudio = (base64Audio: string) => {
+    try {
+      const audioBlob = base64ToBlob(base64Audio, "audio/wav");
+      const audioUrl = URL.createObjectURL(audioBlob);
+      const audio = new Audio(audioUrl);
+
+      setState("speaking");
+      audio.play().catch((error) => {
+        console.error("Error playing audio:", error);
+      });
+
+      audio.onended = () => {
+        setState("idle");
+        URL.revokeObjectURL(audioUrl);
+      };
+    } catch (error) {
+      setState("idle");
+      console.error("Error creating audio:", error);
+    }
+  };
+
+  const base64ToBlob = (base64: string, mimeType: string): Blob => {
+    const byteCharacters = atob(base64);
+    const byteNumbers = new Array(byteCharacters.length);
+
+    for (let i = 0; i < byteCharacters.length; i++) {
+      byteNumbers[i] = byteCharacters.charCodeAt(i);
+    }
+
+    const byteArray = new Uint8Array(byteNumbers);
+    return new Blob([byteArray], { type: mimeType });
+  };
+
+  const blobToBase64 = (blob: Blob): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = reader.result as string;
+        // Remove the "data:audio/wav;base64," prefix
+        // console.log("Base64 Audio:", result);
+        const base64 = result.split(",")[1];
+        resolve(base64);
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+  };
 
   const handleMicClick = () => {
     if (state === "idle") {
-      console.log("Starting conversation...");
-      startConversation();
-    } else {
-      console.log("Stopping conversation...");
-      stopConversation();
-      setState("idle");
+      console.log("Started recording...");
+      startRecording();
+    } else if (state === "listening") {
+      console.log("Recording stopped");
+      stopRecording();
     }
+  };
+
+  const handleRoomChange = (roomId: string) => {
+    setSelectedRoom(roomId);
+    disconnect();
+    const userData = localStorage.getItem("user");
+    if (userData) {
+      const user = JSON.parse(userData);
+      user.roomid = roomId;
+      localStorage.setItem("user", JSON.stringify(user));
+    }
+
+    connectWebSocket();
+  };
+
+  const handleLanguageChange = (langCode: string) => {
+    setSelectedLanguage(langCode);
+    disconnect();
+    const userData = localStorage.getItem("user");
+    if (userData) {
+      const user = JSON.parse(userData);
+      user.language = langCode;
+      localStorage.setItem("user", JSON.stringify(user));
+    }
+    connectWebSocket();
   };
 
   const getStateColor = () => {
     switch (state) {
       case "listening":
         return "from-red-500 to-pink-500";
-      case "processing":
+      case "Sending":
         return "from-yellow-500 to-orange-500";
       case "speaking":
         return "from-blue-500 to-purple-500";
@@ -155,8 +423,8 @@ export default function AssistantUI() {
     switch (state) {
       case "listening":
         return "I'm listening...";
-      case "processing":
-        return "Processing...";
+      case "Sending":
+        return "Sending...";
       case "speaking":
         return "Speaking...";
       default:
@@ -164,9 +432,55 @@ export default function AssistantUI() {
     }
   };
 
-  const currentVoice = voices.find((v) => v.id === selectedVoice) || voices[0];
-  const currentLanguage =
-    languages.find((l) => l.code === selectedLanguage) || languages[0];
+  // Fetch users from rooms endpoint
+  const fetchUsers = async () => {
+    try {
+      const res = await fetch("/api/rooms");
+      const data = await res.json();
+      // Flatten users from all rooms, add room info if needed
+      const usersList = data.rooms.flatMap((room: any) =>
+        room.users.map((user: any) => ({
+          ...user,
+          roomId: room.id,
+          roomName: room.name,
+          type: room.type,
+        }))
+      );
+      setFetchedUsers(usersList);
+    } catch (error) {
+      console.error("Failed to fetch users from rooms:", error);
+    }
+  };
+  useEffect(() => {
+    fetchUsers();
+  }, []);
+
+  // Fetch languages and rooms on mount
+  useEffect(() => {
+    fetch("/api/languages")
+      .then((response) => response.json())
+      .then((data) => {
+        if (
+          data.languages &&
+          Array.isArray(data.languages) &&
+          data.languages.length > 0
+        ) {
+          setLanguagesList(data.languages);
+          setSelectedLanguage(data.languages[0].code);
+        }
+      })
+      .catch((error) => console.error("Error fetching languages:", error));
+
+    fetch("/api/rooms")
+      .then((response) => response.json())
+      .then((data) => {
+        if (data.rooms && Array.isArray(data.rooms) && data.rooms.length > 0) {
+          setRooms(data.rooms);
+          setSelectedRoom(data.rooms[0].id);
+        }
+      })
+      .catch((error) => console.error("Error fetching rooms:", error));
+  }, []);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 p-4 relative overflow-hidden">
@@ -206,37 +520,25 @@ export default function AssistantUI() {
                       <div className="relative">
                         <Avatar className="w-12 h-12 ring-2 ring-white/30">
                           <AvatarImage
-                            src={currentUser.avatar || "/placeholder.svg"}
+                          // src={currentUser.avatar || "/placeholder.svg"}
                           />
                           <AvatarFallback className="bg-gradient-to-r from-purple-500 to-pink-500 text-white text-lg font-bold">
-                            {currentUser.name
+                            {userName
                               .split(" ")
                               .map((n) => n[0])
                               .join("")}
                           </AvatarFallback>
                         </Avatar>
-                        {currentUser.isOnline && (
-                          <div className="absolute -bottom-1 -right-1 w-3 h-3 bg-green-500 rounded-full border-2 border-white animate-pulse"></div>
-                        )}
+                        <div className="absolute -bottom-1 -right-1 w-3 h-3 bg-green-500 rounded-full border-2 border-white animate-pulse"></div>
                       </div>
                       <div>
                         <h3 className="font-bold text-xl text-white">
-                          {currentUser.name}
+                          {userName}
                         </h3>
                         <div className="flex items-center space-x-2 text-gray-300">
-                          <div
-                            className={`w-2 h-2 rounded-full bg-gradient-to-r ${currentVoice.color}`}
-                          ></div>
                           <span className="text-xs">
-                            {voices.find((v) => v.id === selectedVoice)?.name} •{" "}
-                            {/* {
-                              languages.find((l) => l.code === selectedLanguage)
-                                ?.code
-                            }{" "} */}
-                            {
-                              languages.find((l) => l.code === selectedLanguage)
-                                ?.name
-                            }
+                            {languagesList.find((l) => l.code === userLanguage)
+                              ?.name || userLanguage}
                           </span>
                         </div>
                       </div>
@@ -244,31 +546,31 @@ export default function AssistantUI() {
 
                     {/* Voice Controls */}
                     <div className="flex items-end space-x-3 ">
-                      {/* Voice Selection */}
+                      {/* Room Selection */}
                       <div className="w-36 flex flex-col space-y-1">
                         <div className="flex items-center space-x-2 text-white">
-                          <Volume2 className="w-4 h-4 text-pink-400" />
-                          <span className="text-sm font-medium">Agent :</span>
+                          <Languages className="w-4 h-4 text-cyan-400" />
+                          <span className="text-sm font-medium">Room :</span>
                         </div>
                         <Select
-                          value={selectedVoice}
-                          onValueChange={setSelectedVoice}
+                          value={selectedRoom}
+                          onValueChange={handleRoomChange}
                         >
                           <SelectTrigger className="bg-white/10 border-white/20 text-white h-9 text-xs w-full">
-                            <SelectValue />
+                            <SelectValue placeholder="Select a room" />
                           </SelectTrigger>
                           <SelectContent className="bg-gray-900 border-gray-700">
-                            {voices.map((voice) => (
+                            {rooms.map((room) => (
                               <SelectItem
-                                key={voice.id}
-                                value={voice.id}
+                                key={room.id}
+                                value={room.id}
                                 className="text-white hover:bg-gray-800"
                               >
-                                <div className="flex items-center space-x-2">
-                                  <div
-                                    className={`w-2 h-2 rounded-full bg-gradient-to-r ${voice.color}`}
-                                  ></div>
-                                  <span className="text-xs">{voice.name}</span>
+                                <div className="flex items-center space-x-3">
+                                  <span>{room.name}</span>
+                                  <span className="text-xs text-gray-400">
+                                    ({room.users?.length ?? 0} users)
+                                  </span>
                                 </div>
                               </SelectItem>
                             ))}
@@ -286,20 +588,19 @@ export default function AssistantUI() {
                         </div>
                         <Select
                           value={selectedLanguage}
-                          onValueChange={setSelectedLanguage}
+                          onValueChange={handleLanguageChange}
                         >
                           <SelectTrigger className="bg-white/10 border-white/20 text-white h-9 text-xs w-full">
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent className="bg-gray-900 border-gray-700">
-                            {languages.map((lang) => (
+                            {languagesList.map((lang) => (
                               <SelectItem
                                 key={lang.code}
                                 value={lang.code}
                                 className="text-white hover:bg-gray-800"
                               >
                                 <div className="flex items-center space-x-2">
-                                  {/* <span>{lang.flag}</span> */}
                                   <span className="text-xs">{lang.name}</span>
                                 </div>
                               </SelectItem>
@@ -308,18 +609,18 @@ export default function AssistantUI() {
                         </Select>
                       </div>
 
-                      {/* Mic Button */}
+                      {/* Disconnect Button */}
                       <div>
                         <Button
                           size="default"
                           className={`bg-gradient-to-r ${getStateColor()} text-white rounded-4xl border-0 w-full`}
-                          //   onClick={handleMicClick}
+                          onClick={disconnect}
                         >
                           {state === "idle" ? (
                             <Mic className="w-4 h-4 mr-1" />
                           ) : state === "listening" ? (
                             <MicOff className="w-4 h-4 mr-1" />
-                          ) : state === "processing" ? (
+                          ) : state === "Sending" ? (
                             <RotateCcw className="w-4 h-4 mr-1" />
                           ) : (
                             <Volume2 className="w-4 h-4 mr-1" />
@@ -340,9 +641,7 @@ export default function AssistantUI() {
                           state === "listening"
                             ? "animate-pulse scale-110 shadow-red-500/50"
                             : ""
-                        } ${
-                          state === "processing" ? "animate-spin-slow" : ""
-                        } ${
+                        } ${state === "Sending" ? "animate-spin-slow" : ""} ${
                           state === "speaking"
                             ? "animate-bounce shadow-blue-500/50"
                             : ""
@@ -358,7 +657,7 @@ export default function AssistantUI() {
                             <Mic className="w-8 h-8" />
                           ) : state === "listening" ? (
                             <MicOff className="w-8 h-8" />
-                          ) : state === "processing" ? (
+                          ) : state === "Sending" ? (
                             <RotateCcw className="w-8 h-8" />
                           ) : (
                             <Volume2 className="w-8 h-8" />
@@ -368,40 +667,38 @@ export default function AssistantUI() {
                     </div>
                   </div>
 
-                  {/* <Separator className="bg-white/20 my-3" /> */}
-
                   {/* Chat Conversation - Bottom Section */}
                   <div className="flex-1 overflow-hidden">
                     <div className="flex items-center justify-between mb-3">
                       <div className="flex items-center">
                         <MessageCircle className="w-4 h-4 mr-2 text-cyan-400" />
                         <h3 className="text-white text-sm font-medium">
-                          Conversation with {currentUser.name}
+                          Conversation with {userName}
                         </h3>
                       </div>
                       <Badge
                         variant="outline"
                         className="text-xs border-white/20 text-gray-300 bg-white/5"
                       >
-                        {userMessages.length} messages
+                        {chatMessages.length} messages
                       </Badge>
                     </div>
 
                     <ScrollArea className="h-[calc(100vh-350px)] min-h-[300px] pr-4">
-                      {userMessages.length > 0 ? (
+                      {chatMessages.length > 0 ? (
                         <div className="space-y-4">
-                          {userMessages.map((message) => (
+                          {chatMessages.map((message) => (
                             <div
                               key={message.id}
                               className={`flex ${
-                                message.type === "user"
+                                message.type === "sender"
                                   ? "justify-end"
                                   : "justify-start"
                               }`}
                             >
                               <div
                                 className={`max-w-[80%] p-3 rounded-xl shadow-md ${
-                                  message.type === "user"
+                                  message.type === "sender"
                                     ? "bg-gradient-to-r from-blue-500 to-purple-600 text-white"
                                     : "bg-white/20 backdrop-blur-sm text-white border border-white/20"
                                 }`}
@@ -411,7 +708,7 @@ export default function AssistantUI() {
                                 </p>
                                 <p
                                   className={`text-xs mt-1 ${
-                                    message.type === "user"
+                                    message.type === "sender"
                                       ? "text-blue-100"
                                       : "text-gray-300"
                                   }`}
@@ -426,9 +723,7 @@ export default function AssistantUI() {
                         <div className="flex items-center justify-center h-full text-gray-400">
                           <div className="text-center">
                             <MessageCircle className="w-10 h-10 mx-auto mb-3 opacity-50" />
-                            <p className="text-sm">
-                              No messages with {currentUser.name} yet
-                            </p>
+                            <p className="text-sm">No messages yet</p>
                             <p className="text-xs mt-1">
                               Start a conversation to see messages here
                             </p>
@@ -455,39 +750,29 @@ export default function AssistantUI() {
                     variant="outline"
                     className="ml-auto text-xs border-white/20 text-gray-300 bg-white/5"
                   >
-                    {users.filter((user) => user.isOnline).length} online
+                    {fetchedUsers.length} online
                   </Badge>
                 </div>
                 <ScrollArea className="h-[calc(100vh-200px)] min-h-[500px]">
                   <div className="space-y-2 p-3">
-                    {users.map((user) => {
-                      const messageCount = getUserMessages(user.id).length;
-                      return (
+                    {fetchedUsers.length > 0 ? (
+                      fetchedUsers.map((user) => (
                         <div
-                          key={user.id}
-                          className={`p-3 rounded-xl cursor-pointer transition-all duration-300 ${
-                            selectedUser === user.id
-                              ? "bg-gradient-to-r from-purple-500/30 to-pink-500/30 border-2 border-purple-400/50 shadow-lg shadow-purple-500/20"
-                              : "bg-white/5 hover:bg-white/10 border border-white/10"
-                          }`}
-                          onClick={() => setSelectedUser(user.id)}
+                          key={user.user_id}
+                          className={`p-3 rounded-xl cursor-pointer transition-all duration-300 bg-white/5 hover:bg-white/10 border border-white/10`}
                         >
                           <div className="flex items-start space-x-3">
                             <div className="relative flex-shrink-0">
                               <Avatar className="w-10 h-10 ring-2 ring-white/30">
-                                <AvatarImage
-                                  src={user.avatar || "/placeholder.svg"}
-                                />
                                 <AvatarFallback className="bg-gradient-to-r from-purple-500 to-pink-500 text-white font-bold">
                                   {user.name
                                     .split(" ")
-                                    .map((n) => n[0])
+                                    .map((n: string) => n[0])
                                     .join("")}
                                 </AvatarFallback>
                               </Avatar>
-                              {user.isOnline && (
-                                <div className="absolute -bottom-1 -right-1 w-3 h-3 bg-green-500 rounded-full border-2 border-white animate-pulse"></div>
-                              )}
+                              {/* No online status from API, so always show */}
+                              <div className="absolute -bottom-1 -right-1 w-3 h-3 bg-green-500 rounded-full border-2 border-white animate-pulse"></div>
                             </div>
                             <div className="flex-1 min-w-0">
                               <div className="flex items-center justify-between mb-1">
@@ -495,31 +780,35 @@ export default function AssistantUI() {
                                   {user.name}
                                 </h4>
                                 <div className="flex items-center text-xs text-gray-300">
-                                  <Clock className="w-3 h-3 mr-1" />
-                                  {user.lastActive}
+                                  <span>{user.language_name}</span>
                                 </div>
                               </div>
                               <p className="text-xs text-gray-400 mb-2 truncate">
-                                {user.voice}
+                                Room: {user.roomName}
                               </p>
                               <div className="flex items-center justify-between gap-2">
                                 <Badge
                                   variant="outline"
                                   className="text-xs border-white/20 text-gray-300 bg-white/5"
                                 >
-                                  {messageCount} messages
+                                  {user.language}
                                 </Badge>
-                                {user.isOnline && (
-                                  <Badge className="text-xs bg-green-500/20 text-green-300 border-green-500/30">
-                                    Online
-                                  </Badge>
-                                )}
+                                <Badge className="text-xs bg-green-500/20 text-green-300 border-green-500/30">
+                                  Online
+                                </Badge>
                               </div>
                             </div>
                           </div>
                         </div>
-                      );
-                    })}
+                      ))
+                    ) : (
+                      <div className="flex items-center justify-center h-full text-gray-400">
+                        <div className="text-center">
+                          <Users className="w-10 h-10 mx-auto mb-3 opacity-50" />
+                          <p className="text-sm">No active users found.</p>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </ScrollArea>
               </CardContent>

@@ -1,7 +1,7 @@
 interface Message {
   id: string;
   userId: string;
-  type: "user" | "assistant";
+  type: "receiver" | "sender";
   content: string;
   timestamp: string;
 }
@@ -9,6 +9,7 @@ interface Message {
 interface User {
   id: string;
   name: string;
+  roomid?: string;
   avatar: string;
   voice: string;
   language: string;
@@ -60,14 +61,14 @@ export const messages: Message[] = [
   {
     id: "1",
     userId: "user1",
-    type: "user",
+    type: "receiver", // was "user"
     content: "What's the weather like today?",
     timestamp: "10:30 AM",
   },
   {
     id: "2",
     userId: "user1",
-    type: "assistant",
+    type: "sender", // was "assistant"
     content:
       "Today's weather is sunny with a high of 75°F and partly cloudy skies. Perfect for outdoor activities!",
     timestamp: "10:30 AM",
@@ -75,14 +76,14 @@ export const messages: Message[] = [
   {
     id: "3",
     userId: "user1",
-    type: "user",
+    type: "receiver", // was "user"
     content: "Set a reminder for my meeting at 3 PM",
     timestamp: "10:32 AM",
   },
   {
     id: "4",
     userId: "user1",
-    type: "assistant",
+    type: "sender", // was "assistant"
     content:
       "I've set a reminder for your meeting at 3 PM today. You'll receive a notification 15 minutes before.",
     timestamp: "10:32 AM",
@@ -90,14 +91,14 @@ export const messages: Message[] = [
   {
     id: "5",
     userId: "user1",
-    type: "user",
+    type: "receiver", // was "user"
     content: "Play some jazz music",
     timestamp: "10:35 AM",
   },
   {
     id: "6",
     userId: "user1",
-    type: "assistant",
+    type: "sender", // was "assistant"
     content:
       "Playing jazz playlist from your music library. Enjoy the smooth sounds!",
     timestamp: "10:35 AM",
@@ -107,14 +108,14 @@ export const messages: Message[] = [
   {
     id: "7",
     userId: "user2",
-    type: "user",
+    type: "receiver", // was "user"
     content: "Calculate 15% tip on $84.50",
     timestamp: "9:15 AM",
   },
   {
     id: "8",
     userId: "user2",
-    type: "assistant",
+    type: "sender", // was "assistant"
     content:
       "A 15% tip on $84.50 would be $12.68. The total amount would be $97.18.",
     timestamp: "9:15 AM",
@@ -122,14 +123,14 @@ export const messages: Message[] = [
   {
     id: "9",
     userId: "user2",
-    type: "user",
+    type: "receiver", // was "user"
     content: "What's my schedule for tomorrow?",
     timestamp: "9:20 AM",
   },
   {
     id: "10",
     userId: "user2",
-    type: "assistant",
+    type: "sender", // was "assistant"
     content:
       "Tomorrow you have a team meeting at 9 AM, lunch with clients at 12 PM, and a project review at 3 PM.",
     timestamp: "9:20 AM",
@@ -139,14 +140,14 @@ export const messages: Message[] = [
   {
     id: "11",
     userId: "user3",
-    type: "user",
+    type: "receiver", // was "user"
     content: "Help me with a recipe for chocolate cake",
     timestamp: "7:45 AM",
   },
   {
     id: "12",
     userId: "user3",
-    type: "assistant",
+    type: "sender", // was "assistant"
     content:
       "I'd be happy to help! Here's a simple chocolate cake recipe: You'll need flour, sugar, cocoa powder, eggs, butter, and vanilla. Would you like the full step-by-step instructions?",
     timestamp: "7:45 AM",
@@ -154,14 +155,14 @@ export const messages: Message[] = [
   {
     id: "13",
     userId: "user3",
-    type: "user",
+    type: "receiver", // was "user"
     content: "Yes, please give me the full recipe",
     timestamp: "7:46 AM",
   },
   {
     id: "14",
     userId: "user3",
-    type: "assistant",
+    type: "sender", // was "assistant"
     content:
       "Here's the complete recipe with measurements and baking instructions...",
     timestamp: "7:46 AM",
@@ -171,14 +172,14 @@ export const messages: Message[] = [
   {
     id: "15",
     userId: "user4",
-    type: "user",
+    type: "receiver", // was "user"
     content: "What's the latest news in technology?",
     timestamp: "Yesterday",
   },
   {
     id: "16",
     userId: "user4",
-    type: "assistant",
+    type: "sender", // was "assistant"
     content:
       "Here are the top tech news stories: AI advancements in healthcare, new smartphone releases, and cybersecurity updates...",
     timestamp: "Yesterday",
@@ -219,12 +220,9 @@ export const voices = [
 ];
 
 export const languages = [
-  { code: "en", name: "English"},
+  { code: "en", name: "English" },
+  { code: "gu", name: "Gujrati" },
   { code: "hi", name: "Hindi" },
-  { code: "ta", name: "Tamil" },
-  { code: "ja", name: "Japanese" },
-  { code: "fr", name: "French" },
-  { code: "de", name: "German" },
 ];
 
 export const getUserMessages = (userId: string): Message[] => {
@@ -237,7 +235,7 @@ export const getUserMessageCount = (userId: string): number => {
 
 export const addMessage = (
   userId: string,
-  type: "user" | "assistant",
+  type: "receiver" | "sender",
   content: string
 ): Message => {
   const newMessage: Message = {
@@ -255,10 +253,15 @@ export const addMessage = (
   return newMessage;
 };
 
-export const addUser = (name: string, language: string = "en"): User => {
+export const addUser = (
+  name: string,
+  roomid: string,
+  language: string = "en"
+): User => {
   const newUser: User = {
     id: `user${users.length + 1}`,
     name,
+    roomid,
     avatar: "/placeholder.svg?height=40&width=40",
     voice: voices[0].name,
     language,
