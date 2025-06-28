@@ -50,16 +50,6 @@ export default function AssistantUI() {
   const silenceStartRef = useRef<number | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
 
-  useEffect(() => {
-    const userData = localStorage.getItem("user");
-    if (userData) {
-      const user = JSON.parse(userData);
-      console.log("Loaded user from localStorage:", user);
-    } else {
-      console.log("No user found in localStorage.");
-    }
-  }, []);
-
   const connectWebSocket = async () => {
     const ws = new WebSocket("ws://localhost:8000/ws/translate/");
 
@@ -72,7 +62,7 @@ export default function AssistantUI() {
         setUserName(user.name);
         setUserLanguage(user.language);
         console.log(
-          "Sending user data to WebSocket:",
+          "Sending user data to WebSocket(roomid,language,name):",
           user.roomid,
           user.language,
           user.name
@@ -101,11 +91,12 @@ export default function AssistantUI() {
         }
 
         if (data.user_id) {
-          console.log("User ID:", data.user_id);
+          console.log("Received User ID:", data.user_id);
           localStorage.setItem("userId", JSON.stringify(data.user_id));
         }
 
         if (data.sender_id) {
+          console.log("Received Audio/Transcript data.");
           const userId = JSON.parse(localStorage.getItem("userId") || '""');
           const senderId = data.sender_id;
           if (senderId != userId) {
@@ -163,6 +154,7 @@ export default function AssistantUI() {
 
   const disconnect = () => {
     if (wsRef.current) {
+      console.log("WebSocket Disconnected.");
       wsRef.current.close();
       wsRef.current = null;
     }
@@ -170,6 +162,7 @@ export default function AssistantUI() {
 
   useEffect(() => {
     connectWebSocket();
+    fetchUsers();
     return () => {
       disconnect();
       if (audioContextRef.current) {
@@ -180,6 +173,34 @@ export default function AssistantUI() {
       }
     };
   }, []);
+
+    // Fetch languages and rooms on mount
+  useEffect(() => {
+    fetch("/api/languages")
+      .then((response) => response.json())
+      .then((data) => {
+        if (
+          data.languages &&
+          Array.isArray(data.languages) &&
+          data.languages.length > 0
+        ) {
+          setLanguagesList(data.languages);
+          setSelectedLanguage(data.languages[0].code);
+        }
+      })
+      .catch((error) => console.error("Error fetching languages:", error));
+
+    fetch("/api/rooms")
+      .then((response) => response.json())
+      .then((data) => {
+        if (data.rooms && Array.isArray(data.rooms) && data.rooms.length > 0) {
+          setRooms(data.rooms);
+          setSelectedRoom(data.rooms[0].id);
+        }
+      })
+      .catch((error) => console.error("Error fetching rooms:", error));
+  }, []);
+
   useEffect(() => {
     if (state === "Sending") {
       setTimeout(() => {
@@ -247,6 +268,7 @@ export default function AssistantUI() {
       if (silenceStartRef.current === null) {
         silenceStartRef.current = Date.now();
       } else if (Date.now() - silenceStartRef.current > SILENCE_DURATION) {
+        console.log("Silence detected, stopping recording...");
         stopRecording();
         silenceStartRef.current = null;
         return;
@@ -291,22 +313,25 @@ export default function AssistantUI() {
       }
 
       setState("Sending");
-      console.log("Recording stopped, Sending audio...");
-
+      
       // Stop silence detection
       if (silenceTimeoutRef.current) {
         clearTimeout(silenceTimeoutRef.current);
         silenceTimeoutRef.current = null;
       }
       silenceStartRef.current = null;
-
+      
       // Stop recording and get the audio data
       const { blob, buffer } = await recorderRef.current.stop();
+      console.log("Recording stopped.");
 
       // Convert blob to base64
+      console.log("Converting audio blob to base64...");
       const base64Audio = await blobToBase64(blob);
+      console.log("Audio converted to base64:", base64Audio.substring(0, 30) + "...");
 
       wsRef.current?.send(JSON.stringify({ audio: base64Audio }));
+      console.log("Audio sent to WebSocket.");
 
       // Clean up - stop all tracks
       if (streamRef.current) {
@@ -323,18 +348,22 @@ export default function AssistantUI() {
     }
   };
 
-  const playAudio = (base64Audio: string) => {
+  const playAudio = async (base64Audio: string) => {
     try {
-      const audioBlob = base64ToBlob(base64Audio, "audio/wav");
+      console.log("converting base64 audio to blob...");
+      const audioBlob = await base64ToBlob(base64Audio, "audio/wav");
+      console.log("Audio blob created:", audioBlob);
       const audioUrl = URL.createObjectURL(audioBlob);
       const audio = new Audio(audioUrl);
 
       setState("speaking");
+      console.log("Playing audio...");
       audio.play().catch((error) => {
         console.error("Error playing audio:", error);
       });
 
       audio.onended = () => {
+        console.log("Audio playback finished.");
         setState("idle");
         URL.revokeObjectURL(audioUrl);
       };
@@ -361,8 +390,7 @@ export default function AssistantUI() {
       const reader = new FileReader();
       reader.onload = () => {
         const result = reader.result as string;
-        // Remove the "data:audio/wav;base64," prefix
-        // console.log("Base64 Audio:", result);
+        // Removed the "data:audio/wav;base64," prefix
         const base64 = result.split(",")[1];
         resolve(base64);
       };
@@ -373,10 +401,8 @@ export default function AssistantUI() {
 
   const handleMicClick = () => {
     if (state === "idle") {
-      console.log("Started recording...");
       startRecording();
     } else if (state === "listening") {
-      console.log("Recording stopped");
       stopRecording();
     }
   };
@@ -390,7 +416,6 @@ export default function AssistantUI() {
       user.roomid = roomId;
       localStorage.setItem("user", JSON.stringify(user));
     }
-
     connectWebSocket();
   };
 
@@ -451,37 +476,7 @@ export default function AssistantUI() {
       console.error("Failed to fetch users from rooms:", error);
     }
   };
-  useEffect(() => {
-    fetchUsers();
-  }, []);
-
-  // Fetch languages and rooms on mount
-  useEffect(() => {
-    fetch("/api/languages")
-      .then((response) => response.json())
-      .then((data) => {
-        if (
-          data.languages &&
-          Array.isArray(data.languages) &&
-          data.languages.length > 0
-        ) {
-          setLanguagesList(data.languages);
-          setSelectedLanguage(data.languages[0].code);
-        }
-      })
-      .catch((error) => console.error("Error fetching languages:", error));
-
-    fetch("/api/rooms")
-      .then((response) => response.json())
-      .then((data) => {
-        if (data.rooms && Array.isArray(data.rooms) && data.rooms.length > 0) {
-          setRooms(data.rooms);
-          setSelectedRoom(data.rooms[0].id);
-        }
-      })
-      .catch((error) => console.error("Error fetching rooms:", error));
-  }, []);
-
+  
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 p-4 relative overflow-hidden">
       {/* Background Animation */}

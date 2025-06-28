@@ -41,6 +41,7 @@ export default function OnboardingPage() {
           Array.isArray(data.languages) &&
           data.languages.length > 0
         ) {
+          console.log("Languages fetched from server.");
           setLanguages(data.languages);
           setSelectedLanguage(data.languages[0].code);
         }
@@ -51,20 +52,13 @@ export default function OnboardingPage() {
       .then((response) => response.json())
       .then((data) => {
         if (data.rooms && Array.isArray(data.rooms) && data.rooms.length > 0) {
+          console.log("Rooms fetched from server.");
           setRooms(data.rooms);
-          console.log("Rooms:", data.rooms);
-          console.log("Selected Room:", data.rooms[0]);
           setSelectedRoom(data.rooms[0].id);
         }
       })
       .catch((error) => console.error("Error:", error));
   }, []);
-
-  useEffect(() => {
-    console.log(
-      `room_id:${selectedRoom},language:${selectedLanguage},name:${name}`
-    );
-  }, [selectedLanguage, selectedRoom, name]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
