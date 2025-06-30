@@ -23,8 +23,10 @@ import {
   RotateCcw,
   Users,
   Languages,
+  Send,
 } from "lucide-react";
 import Recorder from "recorder-js";
+import { Input } from "@/components/ui/input";
 
 type AssistantState = "idle" | "listening" | "Sending" | "speaking";
 
@@ -32,6 +34,7 @@ export default function AssistantUI() {
   const [state, setState] = useState<AssistantState>("idle");
   const [userName, setUserName] = useState<string>("");
   const [userLanguage, setUserLanguage] = useState<string>("");
+  const [textMessage, setTextMessage] = useState<string>("");
   const [languagesList, setLanguagesList] = useState<
     { code: string; name: string }[]
   >([]);
@@ -95,7 +98,26 @@ export default function AssistantUI() {
           localStorage.setItem("userId", JSON.stringify(data.user_id));
         }
 
-        if (data.sender_id) {
+        // Handle incoming text messages
+        if (data.text) {
+          const userId = JSON.parse(localStorage.getItem("userId") || '""');
+          const senderId = data.sender_id;
+          if (senderId != userId) {
+            setChatMessages((prev) => [
+              ...prev,
+              {
+                id: Date.now(),
+                type: "receiver",
+                content: data.text,
+                timestamp: new Date().toLocaleTimeString(),
+                senderName: data.sender_name,
+                language: data.language,
+              },
+            ]);
+          }
+        }
+
+        if (data.audio) {
           console.log("Received Audio/Transcript data.");
           const userId = JSON.parse(localStorage.getItem("userId") || '""');
           const senderId = data.sender_id;
@@ -174,7 +196,7 @@ export default function AssistantUI() {
     };
   }, []);
 
-    // Fetch languages and rooms on mount
+  // Fetch languages and rooms on mount
   useEffect(() => {
     fetch("/api/languages")
       .then((response) => response.json())
@@ -313,14 +335,14 @@ export default function AssistantUI() {
       }
 
       setState("Sending");
-      
+
       // Stop silence detection
       if (silenceTimeoutRef.current) {
         clearTimeout(silenceTimeoutRef.current);
         silenceTimeoutRef.current = null;
       }
       silenceStartRef.current = null;
-      
+
       // Stop recording and get the audio data
       const { blob, buffer } = await recorderRef.current.stop();
       console.log("Recording stopped.");
@@ -328,7 +350,10 @@ export default function AssistantUI() {
       // Convert blob to base64
       console.log("Converting audio blob to base64...");
       const base64Audio = await blobToBase64(blob);
-      console.log("Audio converted to base64:", base64Audio.substring(0, 30) + "...");
+      console.log(
+        "Audio converted to base64:",
+        base64Audio.substring(0, 30) + "..."
+      );
 
       wsRef.current?.send(JSON.stringify({ audio: base64Audio }));
       console.log("Audio sent to WebSocket.");
@@ -431,6 +456,67 @@ export default function AssistantUI() {
     connectWebSocket();
   };
 
+  const speakMessage = (text: string) => {
+    if ("speechSynthesis" in window) {
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.rate = 0.8;
+      utterance.pitch = 1;
+      utterance.volume = 0.8;
+      const voices = speechSynthesis.getVoices();
+      const matchingVoice = voices.find(
+        (voice) =>
+          voice.lang.startsWith(selectedLanguage) ||
+          voice.lang.startsWith(userLanguage)
+      );
+      if (matchingVoice) {
+        utterance.voice = matchingVoice;
+      }
+      speechSynthesis.speak(utterance);
+    }
+  };
+
+  const handleSendTextMessage = () => {
+    if (!textMessage.trim() || !wsRef.current) return;
+    wsRef.current.send(JSON.stringify({ text: textMessage }));
+    setChatMessages((prev) => [
+      ...prev,
+      {
+        id: Date.now(),
+        type: "sender",
+        content: textMessage,
+        timestamp: new Date().toLocaleTimeString(),
+      },
+    ]);
+    setTextMessage("");
+  };
+
+  const handleKeyPress = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      handleSendTextMessage();
+    }
+  };
+
+  // Fetch users from rooms endpoint
+  const fetchUsers = async () => {
+    try {
+      const res = await fetch("/api/rooms");
+      const data = await res.json();
+      // Flatten users from all rooms, add room info if needed
+      const usersList = data.rooms.flatMap((room: any) =>
+        room.users.map((user: any) => ({
+          ...user,
+          roomId: room.id,
+          roomName: room.name,
+          type: room.type,
+        }))
+      );
+      setFetchedUsers(usersList);
+    } catch (error) {
+      console.error("Failed to fetch users from rooms:", error);
+    }
+  };
+
   const getStateColor = () => {
     switch (state) {
       case "listening":
@@ -457,26 +543,6 @@ export default function AssistantUI() {
     }
   };
 
-  // Fetch users from rooms endpoint
-  const fetchUsers = async () => {
-    try {
-      const res = await fetch("/api/rooms");
-      const data = await res.json();
-      // Flatten users from all rooms, add room info if needed
-      const usersList = data.rooms.flatMap((room: any) =>
-        room.users.map((user: any) => ({
-          ...user,
-          roomId: room.id,
-          roomName: room.name,
-          type: room.type,
-        }))
-      );
-      setFetchedUsers(usersList);
-    } catch (error) {
-      console.error("Failed to fetch users from rooms:", error);
-    }
-  };
-  
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 p-4 relative overflow-hidden">
       {/* Background Animation */}
@@ -502,16 +568,16 @@ export default function AssistantUI() {
           </p>
         </div>
 
-        <div className="grid lg:grid-cols-3 gap-6">
+        <div className="grid lg:grid-cols-3 gap-4 lg:gap-6">
           {/* Main Voice Interface - More Compact */}
           <div className="lg:col-span-2">
             <Card className="bg-white/10 backdrop-blur-lg border-white/20 shadow-2xl h-full">
               <CardContent className="p-4">
                 <div className="flex flex-col h-full">
                   {/* User Info and Controls - Top Section */}
-                  <div className="flex flex-col md:flex-row items-center justify-between gap-4 mb-4">
+                  <div className="flex flex-col space-y-4 mb-4">
                     {/* User Info */}
-                    <div className="flex items-center space-x-3">
+                    <div className="flex items-center justify-center sm:justify-start space-x-3">
                       <div className="relative">
                         <Avatar className="w-12 h-12 ring-2 ring-white/30">
                           <AvatarImage
@@ -526,11 +592,11 @@ export default function AssistantUI() {
                         </Avatar>
                         <div className="absolute -bottom-1 -right-1 w-3 h-3 bg-green-500 rounded-full border-2 border-white animate-pulse"></div>
                       </div>
-                      <div>
+                      <div className="text-center sm:text-left">
                         <h3 className="font-bold text-xl text-white">
                           {userName}
                         </h3>
-                        <div className="flex items-center space-x-2 text-gray-300">
+                        <div className="flex items-center justify-center sm:justify-start space-x-2 text-gray-300">
                           <span className="text-xs">
                             {languagesList.find((l) => l.code === userLanguage)
                               ?.name || userLanguage}
@@ -539,13 +605,13 @@ export default function AssistantUI() {
                       </div>
                     </div>
 
-                    {/* Voice Controls */}
-                    <div className="flex items-end space-x-3 ">
+                    {/* Voice Controls - Now below user info on mobile */}
+                    <div className="flex flex-col sm:flex-row items-center sm:items-end space-y-2 sm:space-y-0 sm:space-x-3 w-full sm:w-auto">
                       {/* Room Selection */}
-                      <div className="w-36 flex flex-col space-y-1">
+                      <div className="w-full sm:w-36 flex flex-col space-y-1">
                         <div className="flex items-center space-x-2 text-white">
                           <Languages className="w-4 h-4 text-cyan-400" />
-                          <span className="text-sm font-medium">Room :</span>
+                          <span className="text-sm font-medium">Room:</span>
                         </div>
                         <Select
                           value={selectedRoom}
@@ -574,12 +640,10 @@ export default function AssistantUI() {
                       </div>
 
                       {/* Language Selection */}
-                      <div className="w-36 flex flex-col space-y-1">
+                      <div className="w-full sm:w-36 flex flex-col space-y-1">
                         <div className="flex items-center space-x-2 text-white">
                           <Languages className="w-4 h-4 text-cyan-400" />
-                          <span className="text-sm font-medium">
-                            Language :
-                          </span>
+                          <span className="text-sm font-medium">Language:</span>
                         </div>
                         <Select
                           value={selectedLanguage}
@@ -605,10 +669,10 @@ export default function AssistantUI() {
                       </div>
 
                       {/* Disconnect Button */}
-                      <div>
+                      <div className="w-full sm:w-auto">
                         <Button
                           size="default"
-                          className={`bg-gradient-to-r ${getStateColor()} text-white rounded-4xl border-0 w-full`}
+                          className={`bg-gradient-to-r ${getStateColor()} text-white rounded-lg border-0 w-full sm:w-auto`}
                           onClick={disconnect}
                         >
                           {state === "idle" ? (
@@ -620,7 +684,18 @@ export default function AssistantUI() {
                           ) : (
                             <Volume2 className="w-4 h-4 mr-1" />
                           )}
-                          {getStateText()}
+                          <span className="hidden sm:inline">
+                            {getStateText()}
+                          </span>
+                          <span className="sm:hidden">
+                            {state === "idle"
+                              ? "Ready"
+                              : state === "listening"
+                              ? "Listening"
+                              : state === "Sending"
+                              ? "Sending"
+                              : "Speaking"}
+                          </span>
                         </Button>
                       </div>
                     </div>
@@ -629,10 +704,10 @@ export default function AssistantUI() {
                   <Separator className="bg-white/20 my-3" />
 
                   {/* Voice Visualizer - Middle Section */}
-                  <div className="flex justify-center my-4">
+                  <div className="flex justify-center my-3 sm:my-4">
                     <div className="relative">
                       <div
-                        className={`w-24 h-24 rounded-full bg-gradient-to-r ${getStateColor()} transition-all duration-500 flex items-center justify-center shadow-xl ${
+                        className={`w-20 h-20 sm:w-24 sm:h-24 rounded-full bg-gradient-to-r ${getStateColor()} transition-all duration-500 flex items-center justify-center shadow-xl ${
                           state === "listening"
                             ? "animate-pulse scale-110 shadow-red-500/50"
                             : ""
@@ -645,17 +720,17 @@ export default function AssistantUI() {
                         <Button
                           size="icon"
                           variant="ghost"
-                          className="w-16 h-16 text-white hover:bg-transparent transition-all duration-300"
+                          className="w-14 h-14 sm:w-16 sm:h-16 text-white hover:bg-transparent transition-all duration-300"
                           onClick={handleMicClick}
                         >
                           {state === "idle" ? (
-                            <Mic className="w-8 h-8" />
+                            <Mic className="w-6 h-6 sm:w-8 sm:h-8" />
                           ) : state === "listening" ? (
-                            <MicOff className="w-8 h-8" />
+                            <MicOff className="w-6 h-6 sm:w-8 sm:h-8" />
                           ) : state === "Sending" ? (
-                            <RotateCcw className="w-8 h-8" />
+                            <RotateCcw className="w-6 h-6 sm:w-8 sm:h-8" />
                           ) : (
-                            <Volume2 className="w-8 h-8" />
+                            <Volume2 className="w-6 h-6 sm:w-8 sm:h-8" />
                           )}
                         </Button>
                       </div>
@@ -679,9 +754,9 @@ export default function AssistantUI() {
                       </Badge>
                     </div>
 
-                    <ScrollArea className="h-[calc(100vh-350px)] min-h-[300px] pr-4">
+                    <ScrollArea className="h-[calc(100vh-420px)] min-h-[250px] pr-2">
                       {chatMessages.length > 0 ? (
-                        <div className="space-y-4">
+                        <div className="space-y-3">
                           {chatMessages.map((message) => (
                             <div
                               key={message.id}
@@ -692,24 +767,41 @@ export default function AssistantUI() {
                               }`}
                             >
                               <div
-                                className={`max-w-[80%] p-3 rounded-xl shadow-md ${
+                                className={`max-w-[85%] sm:max-w-[80%] p-3 rounded-xl shadow-md relative group ${
                                   message.type === "sender"
                                     ? "bg-gradient-to-r from-blue-500 to-purple-600 text-white"
                                     : "bg-white/20 backdrop-blur-sm text-white border border-white/20"
                                 }`}
                               >
-                                <p className="text-sm leading-relaxed">
-                                  {message.content}
-                                </p>
-                                <p
-                                  className={`text-xs mt-1 ${
-                                    message.type === "sender"
-                                      ? "text-blue-100"
-                                      : "text-gray-300"
-                                  }`}
-                                >
-                                  {message.timestamp}
-                                </p>
+                                <div className="flex items-start justify-between gap-2">
+                                  <div className="flex-1 min-w-0">
+                                    <p className="text-sm leading-relaxed break-words">
+                                      {message.content}
+                                    </p>
+                                    <p
+                                      className={`text-xs mt-1 ${
+                                        message.type === "sender"
+                                          ? "text-blue-100"
+                                          : "text-gray-300"
+                                      }`}
+                                    >
+                                      {message.timestamp}
+                                    </p>
+                                  </div>
+                                  <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    className={`opacity-0 group-hover:opacity-100 transition-opacity duration-200 p-1 h-6 w-6 ${
+                                      message.type === "sender"
+                                        ? "hover:bg-white/20 text-white"
+                                        : "hover:bg-white/10 text-gray-300"
+                                    }`}
+                                    onClick={() => speakMessage(textMessage)}
+                                    title="Read message aloud"
+                                  >
+                                    <Volume2 className="w-3 h-3" />
+                                  </Button>
+                                </div>
                               </div>
                             </div>
                           ))}
@@ -717,7 +809,7 @@ export default function AssistantUI() {
                       ) : (
                         <div className="flex items-center justify-center h-full text-gray-400">
                           <div className="text-center">
-                            <MessageCircle className="w-10 h-10 mx-auto mb-3 opacity-50" />
+                            <MessageCircle className="w-8 h-8 sm:w-10 sm:h-10 mx-auto mb-3 opacity-50" />
                             <p className="text-sm">No messages yet</p>
                             <p className="text-xs mt-1">
                               Start a conversation to see messages here
@@ -726,6 +818,27 @@ export default function AssistantUI() {
                         </div>
                       )}
                     </ScrollArea>
+
+                    {/* Text Input Section */}
+                    <div className="mt-4 pt-3 border-t border-white/20">
+                      <div className="flex items-center space-x-2">
+                        <Input
+                          value={textMessage}
+                          onChange={(e) => setTextMessage(e.target.value)}
+                          onKeyPress={handleKeyPress}
+                          placeholder="Type a message..."
+                          className="flex-1 bg-white/10 border-white/20 text-white placeholder:text-gray-400 focus:border-purple-400 focus:ring-purple-400/20"
+                        />
+                        <Button
+                          size="sm"
+                          onClick={handleSendTextMessage}
+                          disabled={!textMessage.trim()}
+                          className="bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 text-white px-3 py-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          <Send className="w-4 h-4" />
+                        </Button>
+                      </div>
+                    </div>
                   </div>
                 </div>
               </CardContent>
